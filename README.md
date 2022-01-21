@@ -49,13 +49,13 @@ Copy and paste from codeboxes below using either wget or curl.
 #### download and install with wget
 
 ```shell
-wget -O /usr/bin/tgsetup https://raw.githubusercontent.com/TorGuard/openwrt-scripts/master/usr/bin/tgsetup && chmod +x /usr/bin/tgsetup && /usr/bin/tgsetup
+wget -O /usr/bin/tgsetup https://raw.githubusercontent.com/FixedBit/openwrt-scripts/master/usr/bin/tgsetup && chmod +x /usr/bin/tgsetup && /usr/bin/tgsetup
 ```
 
 ### download and install with curl
 
 ```shell
-curl -o /usr/bin/tgsetup https://raw.githubusercontent.com/TorGuard/openwrt-scripts/master/usr/bin/tgsetup && chmod +x /usr/bin/tgsetup && /usr/bin/tgsetup
+curl -o /usr/bin/tgsetup https://raw.githubusercontent.com/FixedBit/openwrt-scripts/master/usr/bin/tgsetup && chmod +x /usr/bin/tgsetup && /usr/bin/tgsetup
 ```
 
 ## Script descriptions

@@ -536,7 +536,7 @@ downloadScripts () {
 
 contstructGitRawUrl () {
   GITRAWURL="https://raw.githubusercontent.com"
-  GITUSER="TorGuard"
+  GITUSER="FixedBit"
   GITREPO="openwrt-scripts"
   GITBRANCH="master"
   GITFOLDER1="usr/bin"

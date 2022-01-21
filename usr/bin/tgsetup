@@ -65,7 +65,7 @@ for i in ${BINS}; do
 	if [ -f /usr/bin/${i} ]; then
 		rm -f /usr/bin/${i}
 	fi
-	${DBIN} /usr/bin/${i} https://raw.githubusercontent.com/TorGuard/openwrt-scripts/master/usr/bin/${i}
+	${DBIN} /usr/bin/${i} https://raw.githubusercontent.com/FixedBit/openwrt-scripts/master/usr/bin/${i}
 	chmod +x /usr/bin/${i}
 done
 tginstall
