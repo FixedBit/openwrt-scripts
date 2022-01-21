@@ -1,7 +1,7 @@
 
 config torguard 'tg0'
-	option ifname='wg'
-	option ifstartnr='0'
+	option ifname 'wg'
+	option ifstartnr '0'
 	option zone '1'
 
 config credentials_tg0
@@ -17,6 +17,7 @@ config interface_tg0
 	option fwmark '0xFE'
 	option delegate '0'
 	option nohostroute '0'
+	list addresses '172.16.1.1/24'
 
 config wireguard_wg0
 	option description 'TorGuard - United States (New York)'
@@ -32,13 +33,12 @@ config wireguard_wg0
 	option tgprivkey ''
 	option tgpubkey ''
 	option wgapipubkey ''
-	option apifix '1'
-	option apifixtimeout '60'
+	option apifix '0'
+	option apifixtimeout '1800'
 
 config tgapi_v1
 	option proto 'https'
 	option api_v1 'api/v1/setup?public-key='
-	option pksuffix '%
 
 config serverlist
 	option json '/etc/torguard/wireguard.json'
@@ -104,6 +104,10 @@ config specification 'spec_dns_opendns'
 config specification 'spec_dns_quad9'
 	option name 'Quad9'
 	list dns '9.9.9.9'
+
+config specification 'spec_dns_tgvpn'
+	option name 'TorGuard VPN internal DNS'
+	list dns '10.9.0.1,10.8.0.1'
 
 config specification 'spec_proxy_hostnames'
 	list hostname 'proxy.torguard.org'

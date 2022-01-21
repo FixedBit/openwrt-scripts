@@ -5,28 +5,23 @@ restartNetwork () {
   /etc/init.d/network restart
 }
 
-urlencode () {
-  # https://secure.n-able.com/webhelp/NC_9-1-0_SO_en/Content/SA_docs/API_Level_Integration/API_Integration_URLEncoding.html
-  # URL Encoding of Special Characters
-  CH1="$ / \ ^ [ ] ="
-  CH2='| ~ & + , : ; ? @ ` " < > # { }'
-  CH3="{ }"
-  echo 'urlencode - replace % with 25'
-  CTXT=$(echo "${1}" | sed 's/%/%25/g') && echo ${CTXT}
-  echo 'urlencode - replace spaces with %20'
-  CTXT=$(echo "${CTXT}" | sed 's/ /%20/g') && echo ${CTXT}
-  for i in ${CH1}; do
-    CHEX=$(echo -n "${i}" | od -A n -t x1 | sed 's/ //g')
-    echo "urlencode - replace ${i} with ${CHEX}"
-    CTXT=$(echo "${CTXT}" | sed 's/\'${i}'/%${CHEX}/g')
+urlencode() {
+  echo "$@" | awk -v ORS="" '{ gsub(/./,"&\n") ; print }' | while read l
+  do
+    c="`echo "$l" | grep '[^-._~0-9a-zA-Z]'`"
+    if [ "$l" == "" ]
+    then
+      echo -n "%20"
+    else
+      if [ -z "$c" ]
+      then
+        echo -n "$l"
+      else
+        printf %%%02X \'"$c"
+      fi
+    fi
   done
-  for i in ${CH2}; do
-    CHEX=$(echo -n "${i}" | od -A n -t x1 | sed 's/ //g')
-    echo "urlencode - replace ${i} with ${CHEX}"
-    CTXT=$(echo "${CTXT}" | sed "s/${i}/%${CHEX}/g")
-  done
-  echo "urlencode input:  ${1}"
-  echo "urlencode output: ${CTXT}"
+  echo ""
 }
 
 preinitchecks () {
@@ -136,11 +131,13 @@ getTorguardUciValues () {
   WGAPIFIXTIMEOUT=$(uci get torguard.@wireguard_${TGIF}[0].apifixtimeout) && echo "get WGAPIFIXTIMEOUT value... ${WGAPIFIXTIMEOUT}"
   # 🛡️ Torguard server [host]:[port]
   ENPOINTPORT=$(uci get torguard.@wireguard_${TGIF}[0].endpoint_port) && echo "get ENPOINTPORT value... ${ENPOINTPORT}"
+  # internal VPN server IP, default 172.16.1.1/24
+  WGADRESSES=$(uci get torguard.@wireguard_${TGIF}[0].addresses) && echo "get WGADRESSES value... ${WGADRESSES}"
 }
 
 createTgCA () {
-  mkdir -p /etc/torguard/ca.crt
-  cat <<'EOF_torguard_ca' | tee /etc/torguard/ca.crt
+  mkdir -p /etc/torguard/torguard.crt
+  cat <<'EOF_torguard_ca' | tee /etc/torguard/torguard.crt
 -----BEGIN CERTIFICATE-----
 MIIEujCCAqKgAwIBAgIRAOLkx9DgmetClFsZ11C9TDIwDQYJKoZIhvcNAQENBQAw
 PTERMA8GA1UECgwIVG9yR3VhcmQxKDAmBgNVBAMMH1Rvckd1YXJkIFByaXZhdGUg
@@ -171,11 +168,12 @@ dI1mOMT8mRwIDfOfBJc=
 -----END CERTIFICATE-----
 EOF_torguard_ca
 }
+
 setDbin () {
   # use curl or wget
   CURLBIN="/usr/bin/curl"
   WGETBIN="/usr/bin/wget"
-  TGCACERT="/etc/torguard/ca.crt"
+  TGCACERT="/etc/torguard/torguard.crt"
   DBINFOUNDMSG1="OK - found:"
   DBINNOTFOUNDMSG1="NOT FOUND"
   DBINFOUNDCURLMSG1="curl: ${DBINFOUNDMSG1} - ${CURLBIN}"
@@ -187,12 +185,20 @@ setDbin () {
   fi
   if [ -f ${CURLBIN} ]; then
     echo "${DBINFOUNDCURLMSG1}"
-    DBIN="${CURLBIN} --cacert ${TGCACERT} -o"
-    DBINAPI="${CURLBIN} --cacert ${TGCACERT} -k"
+    DBIN="${CURLBIN} -o"
+    if [ -f ${TGCACERT} ]; then
+      DBINAPI="${CURLBIN} --cacert ${TGCACERT}"
+    else
+      DBINAPI="${CURLBIN} -k"
+    fi
   elif [ -f ${WGETBIN} ]; then
     echo "${DBINFOUNDWGETMSG1}"
-    DBIN="${WGETBIN} --ca-certificate ${TGCACERT} -O"
-    DBINAPI="${WGETBIN} --ca-certificate ${TGCACERT} -qO-"
+    DBIN="${WGETBIN} -O"
+    if [ -f ${TGCACERT} ]; then
+      DBINAPI="${WGETBIN} --ca-certificate ${TGCACERT} -qO-"
+    else
+      DBINAPI="${WGETBIN} --no-check-certificate -qO-"
+    fi
   else
     echo "curl: ${DBINNOTFOUNDMSG1}"
     echo "wget: ${DBINNOTFOUNDMSG1}"
@@ -293,11 +299,15 @@ APIFIXTIMEOUTMSG1="Set time Examples:
                or 24h
                or 1d"
 APIFIXMSG1="---
-ℹ️ APIFIX Info
+ℹ️ APIFIX Info (obosolete, 
+- ℹ️ obosolete
+  TorGuard connection does not expire when connected.
+  Use only if you are not permanently connected
+  to torguard server
 - If you use server with connection expiration,
   then you need to use API fix because connection
   requires to validate within specific time, if
-  you do not know, recommended is to enable API fix
+  you do not know, recommended is to disable API fix
 - if you enable apifix, you can change deault timeout
 ---"
 }
@@ -305,18 +315,13 @@ APIFIXMSG1="---
 # TGINIT Functions
 getmyipTorGuard () {
 	URL="https://updates.torguard.biz/cgi-bin/whatismyip.pl"
-	MYIPADDRESS=$(${DBINAPI} ${URL})
+  ${DBIN} /tmp/torguardip ${URL}
+  MYIPADDRESS=$(cat /tmp/torguardip)
 }
 
 # Wireguarrd key generation
 apiformatpubkey () {
-  # disable as buggy
-	#APIPUBKEY=$(echo "${PUBLIC}" | sed 's/=/%3D/') && echo "apiformatpubkey... formating api public key ... OK: ${APIPUBKEY}"
-  #urlencode "${PUBLIC}"
-  #APIPUBKEY="${CTXT}" && echo "APIPUBKEY: ${APIPUBKEY}" && CTXT=''
-
-  APIPUBKEY="${PUBLIC}"
-  # clear ctxt var
+	APIPUBKEY=$(urlencode "${PUBLIC}") && echo "apiformatpubkey... formating api public key ... OK: ${APIPUBKEY}"
 }
 
 createwgpubkey () {
@@ -425,18 +430,19 @@ addwginterface () {
 	echo "set new interface's private key: ${2}" && uci set network.@interface[-1].private_key="${2}"
 	echo "set new interface's listen port: ${3}" && uci set network.@interface[-1].listen_port="${3}"
 	echo "set new interface's addresses: ${4}" && uci add_list network.@interface[-1].addresses="${4}"
-	echo "set new interface's MTU (default 1420): ${5}" && uci set network.@interface[-1].mtu="${5}"
-	echo "set new interface's fwmark (default 0xFE): 0x${6}" && uci set network.@interface[-1].fwmark="0x${6}"
-	echo "use of builtin IPv6-management (disabled by default, 0): ${7}" &&	uci set network.@interface[-1].delegate="${7}"
-	echo "set new interface's nohostrouter (disabled by default, 0): ${8}" && uci set network.@interface[-1].nohostroute="${8}"
+	echo "set new interface's addresses, local server: ${5}" && uci add_list network.@interface[-1].addresses="${5}"
+	echo "set new interface's MTU (default 1420): ${6}" && uci set network.@interface[-1].mtu="${6}"
+	echo "set new interface's fwmark (default 0xFE): 0x${7}" && uci set network.@interface[-1].fwmark="0x${7}"
+	echo "use of builtin IPv6-management (disabled by default, 0): ${8}" &&	uci set network.@interface[-1].delegate="${8}"
+	echo "set new interface's nohostrouter (disabled by default, 0): ${9}" && uci set network.@interface[-1].nohostroute="${9}"
 	echo "add wireguard peer ${1}" && uci add network wireguard_${1}
-	echo "add wireguard peer ${1} description: ${9}" && uci set network.@wireguard_${1}[-1].description="${9}"
-	echo "add wireguard peer ${1} public key: ${10}" && uci set network.@wireguard_${1}[-1].public_key="${10}"
-	echo "add wireguard peer ${1} allowed ip's: ${11}" && uci add_list network.@wireguard_${1}[-1].allowed_ips="${11}"
-	echo "add wireguard peer ${1} Endpoint host: ${12}" && uci set network.@wireguard_${1}[-1].endpoint_host="${12}"
-	echo "add wireguard peer ${1} Endpoint port: ${13}" && uci set network.@wireguard_${1}[-1].endpoint_port="${13}"
-	echo "add wireguard peer ${1} Keepalive: ${14}" && uci set network.@wireguard_${1}[-1].persistent_keepalive="${14}"
-	echo "add wireguard peer ${1} Route allowed ip's: ${15}" && uci set network.@wireguard_${1}[-1].route_allowed_ips="${15}"
+	echo "add wireguard peer ${1} description: ${10}" && uci set network.@wireguard_${1}[-1].description="${10}"
+	echo "add wireguard peer ${1} public key: ${11}" && uci set network.@wireguard_${1}[-1].public_key="${11}"
+	echo "add wireguard peer ${1} allowed ip's: ${12}" && uci add_list network.@wireguard_${1}[-1].allowed_ips="${12}"
+	echo "add wireguard peer ${1} Endpoint host: ${13}" && uci set network.@wireguard_${1}[-1].endpoint_host="${13}"
+	echo "add wireguard peer ${1} Endpoint port: ${14}" && uci set network.@wireguard_${1}[-1].endpoint_port="${14}"
+	echo "add wireguard peer ${1} Keepalive: ${15}" && uci set network.@wireguard_${1}[-1].persistent_keepalive="${15}"
+	echo "add wireguard peer ${1} Route allowed ip's: ${16}" && uci set network.@wireguard_${1}[-1].route_allowed_ips="${16}"
 	echo "commit network ..." && uci commit network
 	echo "Add created wireguard interface to lan zone (this will overwrite any other firewall.@zone[0].network setting, please recheck if using non default settings)"
 	uci set firewall.@zone[${16}].network="${17} ${1}"
@@ -483,7 +489,7 @@ tginitAddWgInterface () {
 	CONEXPIRATIONEPOCH=$(echo ${TGINFO} | awk -F'[,]' '{print $9}' | awk -F'[:]' '{print $2}' | sed 's/"//g' | sed 's/}//g') && echo "Expiration date epoch: ${CONEXPIRATIONEPOCH}"
 	CONEXPIRATIONHUMAN=$(date -d @${CONEXPIRATIONEPOCH}) && echo "Expiration date: ${CONEXPIRATIONHUMAN}"
 	echo "create new wireguard interface with torguards server: ${1}"
-	addwginterface "${WGINTERFACE}${WGIFNR}" "${PRIVATE}" "${TMPPORT}" "${CLIENTIP}" "${MTU}" "${TMPFWMARK}" "${USEBUILTINIPV6}" "${NOHOSTROUTE}" "${DESCRIPTION}" "${WGPUBLIC}" "${ALLOWEDIPS}" "${WGSERVER}" "${WGPORT}" "${KEEPALIVE}" "${ROUTEALLOWEDIPS}" "${FIREWALLZONE}" "${ZONEINTERFACES}"
+	addwginterface "${WGINTERFACE}${WGIFNR}" "${PRIVATE}" "${TMPPORT}" "${CLIENTIP}" "${WGADRESSES}" "${MTU}" "${TMPFWMARK}" "${USEBUILTINIPV6}" "${NOHOSTROUTE}" "${DESCRIPTION}" "${WGPUBLIC}" "${ALLOWEDIPS}" "${WGSERVER}" "${WGPORT}" "${KEEPALIVE}" "${ROUTEALLOWEDIPS}" "${FIREWALLZONE}" "${ZONEINTERFACES}"
 }
 
 setCopyright () {
@@ -680,18 +686,16 @@ do you want to continue (y/n)? " setcred
   esac
     read -p "ℹ️ - By not setting your your custom IP, New York's server will be used as default
 
-Do you want to set custom IP (y/n)? " askserv
+Do you want to set custom IP (y/n)? " askserv;
   case "$askserv" in 
     y|Y ) read -p "Set your server ip address: " setserv;
           uci set torguard.@wireguard_${TGIF}[0].description="TorGuard - Dedicated - ${TGIF}";
           uci set torguard.@wireguard_${TGIF}[0].endpoint_host="$setserv";
           read -p 'Set your wireguard private key: ' TORGUARDAPIPRIVKEY;
           uci set torguard.@wireguard_${TGIF}[0].tgprivkey="${TORGUARDAPIPRIVKEY}";
-          uci set torguard.@wireguard_${TGIF}[0].tgpubkey="$(echo "${TORGUARDAPIPRIVKEY}" | wg pubkey)";
           tgpubkey=$(echo "${TORGUARDAPIPRIVKEY}" | wg pubkey)
-          #urlencode "${tgpubkey}"
-          #wgapipubkey="${CTXT}" && CTXT=''
-          wgapipubkey="$(echo "${TORGUARDAPIPRIVKEY}" | wg pubkey)"
+          uci set torguard.@wireguard_${TGIF}[0].tgpubkey="${tgpubkey}";
+          wgapipubkey=$(urlencode "${tgpubkey}")          
           uci set torguard.@wireguard_${TGIF}[0].wgapipubkey="${wgapipubkey}";
           uci commit torguard;;
     n|N ) echo "using default script server";;
@@ -711,6 +715,7 @@ Do you want to set custom IP (y/n)? " askserv
   esac
   read -p "${APIFIXMSG1}
 
+(API fix is disabled per default)
 Do you want to use API fix for connection expiration (y/n)? " askapifix
   case "$askapifix" in 
     y|Y ) uci set torguard.@wireguard_${TGIF}[0].apifix='1';uci commit torguard;;
@@ -718,7 +723,7 @@ Do you want to use API fix for connection expiration (y/n)? " askapifix
     * ) echo "${INVALIDCHOICEMSG1}"; exit ;;
   esac
   read -p "${APIFIXTIMEOUTMSG1}
-Default apifixtimeout: 1m
+Default apifixtimeout: 30m
 
 Please set apifixtimeout: " setapifixtimeout;
 uci set torguard.@wireguard_${TGIF}[0].apifixtimeout="${setapifixtimeout}";uci commit torguard
@@ -769,8 +774,8 @@ tgInitUciBasic () {
   uci set torguard.@wireguard_${TGIF}[-1].tgprivkey="${PRIVATE}"
   uci set torguard.@wireguard_${TGIF}[-1].wgapipubkey="${APIPUBKEY}"
   uci set torguard.@wireguard_${TGIF}[-1].upgrade='0'
-  uci set torguard.@wireguard_${TGIF}[-1].apifix='1'
-  uci set torguard.@wireguard_${TGIF}[-1].apifixtimeout='1m'
+  uci set torguard.@wireguard_${TGIF}[-1].apifix='0'
+  uci set torguard.@wireguard_${TGIF}[-1].apifixtimeout='30m'
 
   # save changes
   uci commit torguard
